@@ -1,20 +1,18 @@
 package sync
 
 import (
+	"fmt"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"fmt"
-	"io/ioutil"
-	"strconv"
-	"strings"
+	log "log/slog"
 
-	"github.com/juju/errors"
-	"github.com/siddontang/go-mysql/mysql"
-	"github.com/siddontang/go/ioutil2"
-	log "github.com/sirupsen/logrus"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/errors"
 )
 
 // PositionHolder the interface to describe MySQL binlog position holder
@@ -35,14 +33,22 @@ func (h *FilePositionHolder) Save(pos *mysql.Position) error {
 	}
 
 	filePath := path.Join(h.dataDir, "master.info")
+	tempFilePath := filePath + ".tmp"
 
 	posContent := fmt.Sprintf("%s:%v", pos.Name, pos.Pos)
 
 	var err error
-	if err = ioutil2.WriteFileAtomic(filePath, []byte(posContent), 0644); err != nil {
-		log.Errorf("canal save master info to file %s err %v", filePath, err)
+	if err = os.WriteFile(tempFilePath, []byte(posContent), 0644); err != nil {
+		log.Error("Canal save master info to file failed", log.String("file", tempFilePath), log.Any("err", err))
+		return err
 	}
-	return err
+
+	if err = os.Rename(tempFilePath, filePath); err != nil {
+		log.Error("Rename temp file failed", log.String("file", tempFilePath), log.Any("err", err))
+		return err
+	}
+
+	return nil
 }
 
 // Load the function to retrieve the MySQL binlog position
@@ -54,15 +60,14 @@ func (h *FilePositionHolder) Load() (*mysql.Position, error) {
 	}
 
 	filePath := path.Join(h.dataDir, "master.info")
-	f, err := os.Open(filePath)
+	_, err := os.Open(filePath)
 	if err != nil && !os.IsNotExist(errors.Cause(err)) {
 		return nil, errors.Trace(err)
 	} else if os.IsNotExist(errors.Cause(err)) {
 		return nil, nil
 	}
-	defer f.Close()
 
-	bytes, err := ioutil.ReadFile(filePath)
+	bytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -74,10 +79,10 @@ func (h *FilePositionHolder) Load() (*mysql.Position, error) {
 		rawPos, err := strconv.Atoi(toks[1])
 
 		if err != nil {
-			return nil, err
+			return nil, errors.Trace(err)
 		}
 		pos.Pos = uint32(rawPos)
-		return &pos, errors.Trace(err)
+		return &pos, nil
 	}
 	return nil, errors.New("Cannot parse mysql position")
 }
@@ -111,7 +116,7 @@ func (m *masterInfo) loadPos() error {
 }
 
 func (m *masterInfo) Save(pos mysql.Position) error {
-	log.Infof("save position %s", pos)
+	log.Info("Save position", log.String("pos", pos.String()))
 
 	m.Lock()
 	defer m.Unlock()

@@ -1,6 +1,6 @@
 package sync
 
-import "github.com/siddontang/go-mysql/canal"
+import "github.com/go-mysql-org/go-mysql/canal"
 
 // Sink the interface to depict sync target
 type Sink interface {

@@ -2,14 +2,15 @@ package sync
 
 import (
 	"context"
-	"github.com/siddontang/go/sync2"
+	log "log/slog"
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
-	"github.com/siddontang/go-mysql/canal"
-	"github.com/siddontang/go-mysql/mysql"
-	log "github.com/sirupsen/logrus"
+	"sync/atomic"
+
+	"github.com/go-mysql-org/go-mysql/canal"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/errors"
 )
 
 // Manager the contral manager to schedule mysql sync
@@ -33,12 +34,12 @@ type Manager struct {
 
 	syncCh chan interface{}
 
-	InsertNum sync2.AtomicInt64
-	UpdateNum sync2.AtomicInt64
-	DeleteNum sync2.AtomicInt64
+	InsertNum int64
+	UpdateNum int64
+	DeleteNum int64
 
 	// 更新消息统计,例:投递到kafka的消息统计
-	MessageCount sync2.AtomicInt64
+	MessageCount atomic.Int64
 }
 
 // NewManager the constructor of mysql sync manager
@@ -120,7 +121,7 @@ func (r *Manager) Run() error {
 
 	pos := r.master.Position()
 	if err := r.canal.RunFrom(pos); err != nil {
-		log.Errorf("start canal err %v", err)
+		log.Error("ERROR: start canal err %v", err)
 		return errors.Trace(err)
 	}
 
@@ -134,7 +135,7 @@ func (r *Manager) Ctx() context.Context {
 
 // Close close the manager
 func (r *Manager) Close() {
-	log.Infof("closing manager")
+	log.Info("closing manager")
 
 	r.cancel()
 
@@ -193,7 +194,7 @@ func (r *Manager) syncLoop() {
 			needFlush = true
 		case <-r.ctx.Done():
 			if err := r.master.Save(pos); err != nil {
-				log.Errorf("save sync position %s err %v, close sync", pos, err)
+				log.Error("Save sync position failed", log.String("pos", pos.String()), log.Any("err", err))
 				r.cancel()
 			}
 			return
@@ -203,12 +204,12 @@ func (r *Manager) syncLoop() {
 			// TODO: retry some times?
 			if err := r.sink.Publish(reqs); err != nil {
 				for retry := 0; retry < 3 && err != nil; retry++ {
-					log.Errorf("Batch flush failed %v, retry %v ...", err, retry+1)
+					log.Error("Batch flush failed", log.Any("err", err), log.Int("retry", retry+1))
 					time.Sleep(time.Second * time.Duration(retry+1))
 					err = r.sink.Publish(reqs)
 				}
 				if err != nil {
-					log.Errorln("Batch flush failed over 3 times, cancelled")
+					log.Error("Batch flush failed over 3 times, cancelled", log.Any("err", err))
 					r.cancel()
 					return
 				}
@@ -222,7 +223,7 @@ func (r *Manager) syncLoop() {
 
 		if needSavePos {
 			if err := r.master.Save(pos); err != nil {
-				log.Errorf("save sync position %s err %v, close sync", pos, err)
+				log.Error("Save sync position failed", log.String("pos", pos.String()), log.Any("err", err))
 				r.cancel()
 				return
 			}

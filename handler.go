@@ -2,10 +2,12 @@ package sync
 
 import (
 	"fmt"
-	"github.com/juju/errors"
-	"github.com/siddontang/go-mysql/canal"
-	"github.com/siddontang/go-mysql/mysql"
-	"github.com/siddontang/go-mysql/replication"
+	"sync/atomic"
+
+	"github.com/pingcap/errors"
+	"github.com/go-mysql-org/go-mysql/canal"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/replication"
 )
 
 // Handler the handler to process all MySQL binlog events
@@ -14,7 +16,7 @@ type Handler struct {
 }
 
 // OnRotate the function to handle binlog position rotation
-func (h *Handler) OnRotate(e *replication.RotateEvent) error {
+func (h *Handler) OnRotate(header *replication.EventHeader, e *replication.RotateEvent) error {
 	pos := mysql.Position{
 		Name: string(e.NextLogName),
 		Pos:  uint32(e.Position),
@@ -26,18 +28,18 @@ func (h *Handler) OnRotate(e *replication.RotateEvent) error {
 }
 
 // OnTableChanged the function to handle table changed
-func (h *Handler) OnTableChanged(schema, table string) error {
+func (h *Handler) OnTableChanged(header *replication.EventHeader, schema, table string) error {
 	return nil
 }
 
 // OnDDL the function to handle DDL event
-func (h *Handler) OnDDL(nextPos mysql.Position, _ *replication.QueryEvent) error {
+func (h *Handler) OnDDL(header *replication.EventHeader, nextPos mysql.Position, _ *replication.QueryEvent) error {
 	h.sm.syncCh <- posSaver{nextPos, true}
 	return h.sm.ctx.Err()
 }
 
 // OnXID the function to handle XID event
-func (h *Handler) OnXID(nextPos mysql.Position) error {
+func (h *Handler) OnXID(header *replication.EventHeader, nextPos mysql.Position) error {
 	h.sm.syncCh <- posSaver{nextPos, false}
 	return h.sm.ctx.Err()
 }
@@ -71,7 +73,7 @@ func (h *Handler) OnRow(e *canal.RowsEvent) error {
 		case canal.UpdateAction:
 			h.makeUpdateRequest(e.Rows)
 		default:
-			err = errors.Errorf("invalid rows action %s", e.Action)
+			errors.Errorf("invalid rows action %s", e.Action)
 		}
 
 		reqs, err = h.sm.sink.Parse(e)
@@ -102,9 +104,9 @@ func (h *Handler) makeRequest(action string, rows [][]interface{}) error {
 	count := len(rows)
 	switch action {
 	case canal.DeleteAction:
-		h.sm.DeleteNum.Add(int64(count))
+		atomic.AddInt64(&h.sm.DeleteNum, int64(count))
 	case canal.InsertAction:
-		h.sm.InsertNum.Add(int64(count))
+		atomic.AddInt64(&h.sm.InsertNum, int64(count))
 	default:
 		fmt.Println("make request no tasks to be processed: None")
 	}
@@ -117,17 +119,21 @@ func (h *Handler) makeUpdateRequest(rows [][]interface{}) error {
 		return errors.Errorf("invalid update rows event, must have 2x rows, but %d", len(rows))
 	}
 	realRows := int64(len(rows) / 2)
-	h.sm.UpdateNum.Add(realRows)
+	atomic.AddInt64(&h.sm.UpdateNum, realRows)
 	return nil
 }
 
 // OnGTID the function to handle GTID event
-func (h *Handler) OnGTID(gtid mysql.GTIDSet) error {
+func (h *Handler) OnGTID(header *replication.EventHeader, gtid mysql.BinlogGTIDEvent) error {
 	return nil
 }
 
 // OnPosSynced Use your own way to sync position. When force is true, sync position immediately.
-func (h *Handler) OnPosSynced(pos mysql.Position, gtidSet mysql.GTIDSet, force bool) error {
+func (h *Handler) OnPosSynced(header *replication.EventHeader, pos mysql.Position, gtidSet mysql.GTIDSet, force bool) error {
+	return nil
+}
+
+func (h *Handler) OnRowsQueryEvent(e *replication.RowsQueryEvent) error {
 	return nil
 }
 

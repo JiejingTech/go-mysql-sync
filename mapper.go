@@ -1,6 +1,6 @@
 package sync
 
-import "github.com/siddontang/go-mysql/canal"
+import "github.com/go-mysql-org/go-mysql/canal"
 
 // RowMapper the mapper to process some row transformation
 type RowMapper interface {

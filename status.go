@@ -3,11 +3,10 @@ package sync
 import (
 	"bytes"
 	"fmt"
+	log "log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // Stat the struct to hold some stats while MySQL sync
@@ -34,15 +33,15 @@ func (s *Stat) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pos := sm.canal.SyncedPosition()
 
 		buf.WriteString(fmt.Sprintf("sync info of %s\n", sm.c.Label))
-		buf.WriteString(fmt.Sprintf("-------------------------------------------------------------------------------\n"))
+		buf.WriteString("-------------------------------------------------------------------------------\n")
 		buf.WriteString(fmt.Sprintf("server_current_binlog:(%s, %d)\n", binName, binPos))
 		buf.WriteString(fmt.Sprintf("read_binlog:%s\n", pos))
 
-		buf.WriteString(fmt.Sprintf("insert_num:%d\n", sm.InsertNum.Get()))
-		buf.WriteString(fmt.Sprintf("update_num:%d\n", sm.UpdateNum.Get()))
-		buf.WriteString(fmt.Sprintf("delete_num:%d\n", sm.DeleteNum.Get()))
+		buf.WriteString(fmt.Sprintf("insert_num:%d\n", sm.InsertNum))
+		buf.WriteString(fmt.Sprintf("update_num:%d\n", sm.UpdateNum))
+		buf.WriteString(fmt.Sprintf("delete_num:%d\n", sm.DeleteNum))
 		buf.WriteString(fmt.Sprintf("sync chan capacity: %d\n", len(sm.syncCh)))
-		buf.WriteString(fmt.Sprintf("-------------------------------------------------------------------------------\n\n"))
+		buf.WriteString("-------------------------------------------------------------------------------\n\n")
 	}
 
 	_, _ = w.Write(buf.Bytes())
@@ -53,11 +52,11 @@ func (s *Stat) Run(addr string) {
 	if len(addr) == 0 {
 		return
 	}
-	log.Infof("run status http server %s", addr)
+	log.Info("Run status http server", log.String("addr", addr))
 	var err error
 	s.l, err = net.Listen("tcp", addr)
 	if err != nil {
-		log.Errorf("listen stat addr %s err %v", addr, err)
+		log.Error("Listen stat addr failed", log.String("addr", addr), log.Any("err", err))
 		return
 	}
 
